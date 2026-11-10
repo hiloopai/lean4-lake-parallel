@@ -449,6 +449,10 @@ def Package.discriminant (self : Package) :=
   else
     s!"{self.prettyName}@{self.version}"
 
+/-- Returns a snapshot of the Lake build store. -/
+@[inline] def getBuildStore : FetchM BuildStore :=
+  .ofFn fun _ _ _ store _ log => return .ok (← store.get) log
+
 /--
 Start reading and parsing the headers of `header`'s imports, so that the import walk, which
 descends into one import at a time, does not wait on each file in turn. A module's input is

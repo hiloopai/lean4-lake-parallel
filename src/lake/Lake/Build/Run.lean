@@ -363,6 +363,7 @@ def mkBuildContext
     else
       return none
   registeredJobs := jobs
+  claims := ← IO.mkRef {slots := 2 * max 4 (System.Platform.Internal.getHardwareConcurrency ()).toNat}
   leanTrace := .ofHash (pureHash ws.lakeEnv.leanGithash)
     s!"Lean {Lean.versionStringCore}, commit {ws.lakeEnv.leanGithash}"
   cancelTk?

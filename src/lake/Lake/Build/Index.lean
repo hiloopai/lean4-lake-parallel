@@ -32,7 +32,7 @@ def recBuildWithIndex (info : BuildInfo) : FetchM (Job (BuildData info.key)) :=
     if let some decl := pkg.findTargetDecl? target then
       if h : decl.kind.isAnonymous then
         let key := BuildKey.packageTarget pkg.keyName target
-        fetchOrCreate key do (decl.targetConfig h).fetchFn pkg
+        fetchOrCreateOnce key do (decl.targetConfig h).fetchFn pkg
       else
         let kind := ⟨decl.kind, by simp [decl.target_eq_type h]⟩
         let job := Job.pure (kind := kind) <| decl.mkConfigTarget pkg
@@ -45,7 +45,7 @@ def recBuildWithIndex (info : BuildInfo) : FetchM (Job (BuildData info.key)) :=
         let recFetch := config.fetchFn <| cast (by simp [h]) data
         if config.memoize then
           let key := BuildKey.facet target facet
-          fetchOrCreate key recFetch
+          fetchOrCreateOnce key recFetch
         else
           recFetch
       else

@@ -37,7 +37,11 @@ partial def LeanLib.recCollectLocalModules
   (self : LeanLib) : FetchM (Job (Array Module))
 := ensureJob do
   let mut col : ModuleCollection := {}
-  for mod in (← self.getModuleArray) do
+  let roots ← self.getModuleArray
+  -- Start reading and parsing every root's header before the walk awaits the first one.
+  for mod in roots do
+    discard mod.imports.fetch
+  for mod in roots do
     col ← go mod col (viaImport := false)
   if col.hasErrors then
     -- This is not considered a fatal error because we want the modules
@@ -54,6 +58,10 @@ where
       let some imps ← (← root.imports.fetch).waitUnlessCanceled?
         | let col' := {col with hasErrors := true}
           return if viaImport then col' else {col' with mods := col'.mods.push root}
+      -- Start parsing the headers of this module's local imports while the walk descends into the first.
+      for mod in imps do
+        if mod.lib.name = self.name && !col.modSet.contains mod then
+          discard mod.imports.fetch
       for mod in imps do
         if mod.lib.name = self.name then
           col ← go mod col (viaImport := true)
@@ -66,6 +74,7 @@ def LeanLib.modulesFacetConfig : LibraryFacetConfig modulesFacet :=
 
 def LeanLib.recBuildElabArts (self : LeanLib) : FetchM (Job Unit) := do
   let mods ← (← self.modules.fetch).await
+  prefetchConcurrently <| mods.map fun mod => (mod.elabArts.key, mod.elabArts.fetch)
   mods.foldlM (init := Job.nil) fun job mod => do
     return job.mix <| ← mod.elabArts.fetch
 
@@ -75,6 +84,7 @@ public def LeanLib.elabArtsFacetConfig : LibraryFacetConfig elabArtsFacet :=
 
 def LeanLib.recBuildIRArts (self : LeanLib) : FetchM (Job Unit) := do
   let mods ← (← self.modules.fetch).await
+  prefetchConcurrently <| mods.map fun mod => (mod.irArts.key, mod.irArts.fetch)
   mods.foldlM (init := Job.nil) fun job mod => do
     return job.mix <| ← mod.irArts.fetch
 

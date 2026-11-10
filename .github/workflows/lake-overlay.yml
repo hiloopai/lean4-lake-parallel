@@ -1,0 +1,98 @@
+name: Lake overlay
+
+# Builds this branch's Lake for the release toolchain in script/lake-overlay/nightly.env, checks it
+# against that toolchain's own Lake, and publishes the files that differ as a release. The release
+# tag is created with GITHUB_TOKEN, so it does not trigger ci.yml's tag builds. `overlay-check/**`
+# branches run the same checks and publish nothing.
+on:
+  push:
+    branches: ["lake-overlay/**", "overlay-check/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  overlay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 50
+          persist-credentials: false
+      - name: Install the release toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          . script/lake-overlay/nightly.env
+          curl --fail --location --silent --show-error --retry 3 \
+            "https://github.com/leanprover/lean4-nightly/releases/download/$NIGHTLY/lean-4.37.0-$NIGHTLY-linux.tar.zst" \
+            --output "$RUNNER_TEMP/lean.tar.zst"
+          echo "$LEAN_SHA256  $RUNNER_TEMP/lean.tar.zst" | sha256sum --check
+          mkdir "$RUNNER_TEMP/release" "$RUNNER_TEMP/logs"
+          tar --zstd -xf "$RUNNER_TEMP/lean.tar.zst" --strip-components=1 -C "$RUNNER_TEMP/release"
+          base=$("$RUNNER_TEMP/release/bin/lean" --githash)
+          git merge-base --is-ancestor "$base" HEAD
+          echo "$RUNNER_TEMP/release/bin" >> "$GITHUB_PATH"
+          {
+            echo "NIGHTLY=$NIGHTLY"
+            echo "BASE=$base"
+            echo "NAME=lake-overlay-$NIGHTLY-$(git rev-parse --short=12 HEAD)"
+          } >> "$GITHUB_ENV"
+      - name: Build the overlay
+        run: script/lake-overlay/build.sh "$RUNNER_TEMP/sound" "$RUNNER_TEMP/overlay"
+      - name: Install it into a copy of the toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=$RUNNER_TEMP/release patched=$RUNNER_TEMP/patched
+          cp -a "$release" "$patched"
+          cp -a "$RUNNER_TEMP/overlay/." "$patched/"
+          for f in bin/lake lib/lean/libLake_shared.so; do
+            diff <(readelf -d "$release/$f" | grep -E 'NEEDED|RUNPATH|SONAME') \
+              <(readelf -d "$patched/$f" | grep -E 'NEEDED|RUNPATH|SONAME')
+          done
+          ldd "$patched/bin/lake" | grep -F "$patched/bin/../lib/lean/libLake_shared.so"
+          diff <("$release/bin/lake" --version) <("$patched/bin/lake" --version)
+          # Toolchain binaries that load libLake_shared must behave as with the release Lake.
+          for b in leanchecker lean-beam lean-beam-mcp beam-daemon; do
+            [ -x "$release/bin/$b" ] || continue
+            a=0; timeout 30 "$release/bin/$b" --help > "$RUNNER_TEMP/logs/$b-release.txt" 2>&1 || a=$?
+            p=0; timeout 30 "$patched/bin/$b" --help > "$RUNNER_TEMP/logs/$b-patched.txt" 2>&1 || p=$?
+            echo "$b --help: release $a, patched $p"
+            [ "$a" = "$p" ]
+          done
+      - name: Run Lake's tests under both toolchains
+        run: python3 script/lake-overlay/check.py tests "$RUNNER_TEMP/release" "$RUNNER_TEMP/patched" "$RUNNER_TEMP/logs"
+      - name: Build the same edits with both toolchains
+        run: python3 script/lake-overlay/check.py sound "$RUNNER_TEMP/release" "$RUNNER_TEMP/patched" "$RUNNER_TEMP/sound" "$RUNNER_TEMP/logs"
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir dist
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 \
+            -C "$RUNNER_TEMP/overlay" -cf - . | zstd -19 -T0 -q -o "dist/$NAME.tar.zst"
+          (cd dist && sha256sum "$NAME.tar.zst" > SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: lake-overlay-logs
+          path: ${{ runner.temp }}/logs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lake-overlay
+          path: dist
+      - name: Publish
+        if: startsWith(github.ref, 'refs/heads/lake-overlay/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$NAME" --target "$GITHUB_SHA" --prerelease --title "$NAME" \
+            --notes "Lake from $GITHUB_SHA for Lean $NIGHTLY (lean --githash $BASE): the toolchain's Lake files this build changes, at their paths under \`lean --print-prefix\`. Install only into that toolchain." \
+            "dist/$NAME.tar.zst" dist/SHA256SUMS

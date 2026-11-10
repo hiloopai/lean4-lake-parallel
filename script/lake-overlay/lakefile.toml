@@ -1,0 +1,30 @@
+# Lake built as the release toolchain lays it out (see `src/lakefile.toml.in`), by the release
+# toolchain's own Lake. `build.sh` links `libLake_shared` and `lake` from these outputs.
+name = "lake"
+# As Lean core: no package prefix on symbols and module initializers, so the libraries are
+# drop-in for the release's, and C compiles against the headers in `.lake/build/include`.
+bootstrap = true
+buildType = "release"
+defaultTargets = ["LeanExport", "Lake", "LakeMain"]
+srcDir = "../src/lake"
+irDir = "lib/temp"
+leanLibDir = "lib/lean"
+nativeLibDir = "lib/lean"
+# Every output in the build folder, where `build.sh` and `check.py` read them.
+enableArtifactCache = false
+restoreAllArtifacts = true
+
+[[lean_lib]]
+name = "LeanExport"
+srcDir = ".."
+globs = ["LeanExport.*"]
+defaultFacets = ["static.export"]
+
+[[lean_lib]]
+name = "Lake"
+globs = ["Lake.*"]
+defaultFacets = ["static", "static.export"]
+
+[[lean_lib]]
+name = "LakeMain"
+defaultFacets = ["static.export"]

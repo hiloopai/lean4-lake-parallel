@@ -158,8 +158,18 @@ public def prefetchConcurrently (xs : Array (BuildKey × FetchM α)) : FetchM Un
   let xs := xs.filter fun (key, _) => !snap.contains key && !claimed.contains key
   if xs.size ≤ 1 then
     return .ok () log
+  -- Each spawned fetch holds a slot until it finishes; without a free slot, a fetch runs here.
+  -- Spawned fetches block on each other, and every blocked task costs the pool a thread.
   let tasks ← xs.mapM fun (key, x) => do
-    return (key, ← BaseIO.asTask (x.toFn fetch pkg? stack store ctx {}))
+    let spawn ← ctx.claims.modifyGet fun t =>
+      if t.slots > 0 then (true, {t with slots := t.slots - 1}) else (false, t)
+    if spawn then
+      return (key, ← BaseIO.asTask do
+        let r ← x.toFn fetch pkg? stack store ctx {}
+        ctx.claims.modify fun t => {t with slots := t.slots + 1}
+        return r)
+    else
+      return (key, Task.pure (← x.toFn fetch pkg? stack store ctx {}))
   let me ← IO.getTID
   let mut log := log
   for (key, task) in tasks do

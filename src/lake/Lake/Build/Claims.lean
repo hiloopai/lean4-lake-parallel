@@ -33,6 +33,8 @@ and its call stack at the time.
 public structure ClaimTable where
   claims : Std.TreeMap BuildKey Claim BuildKey.quickCmp := {}
   waiting : Std.HashMap UInt64 (BuildKey × List BuildKey) := {}
+  /-- How many more fetches `prefetchConcurrently` may run in tasks of their own. -/
+  slots : Nat
 
 /--
 Whether the thread `me`, with call stack `stack`, waiting for `key` would deadlock: that is,

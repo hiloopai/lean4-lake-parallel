@@ -42,6 +42,26 @@ import's IR is loaded (see `Lean.importModulesCore`). When code generation is po
 @[inline] def Module.fetchExportInfo (self : Module) : FetchM (Job ModuleMetaExportInfo) :=
   self.metaExportInfo.fetch
 
+/--
+`findModules`, memoized for the build. A build resolves every import of every module it visits,
+and `Workspace.findModules` tests each import against every library's roots and globs.
+-/
+def findModulesCached
+  [Monad m] [MonadBuild m] [MonadWorkspace m] [MonadLiftT (ST IO.RealWorld) m] (mod : Lean.Name)
+: m (Array Module) := do
+  let cache := (← getBuildContext).moduleCache
+  if let some mods := (← cache.get).find? mod then
+    return mods
+  let mods ← findModules mod
+  cache.modify (·.insert mod mods)
+  return mods
+
+/-- `findModule?`, memoized for the build (see `findModulesCached`). -/
+@[inline] def findModuleCached?
+  [Monad m] [MonadBuild m] [MonadWorkspace m] [MonadLiftT (ST IO.RealWorld) m] (mod : Lean.Name)
+: m (Option Module) := do
+  return (← findModulesCached mod)[0]?
+
 /-! ## Facet Builds
 Build function definitions for a module's builtin facets.
 -/
@@ -54,7 +74,7 @@ def Module.recFetchInput (mod : Module) : FetchM (Job ModuleInput) := Job.async 
   setTrace trace
   let header ← Lean.parseImports' contents path.toString
   let imports ← header.imports.mapM fun imp => do
-    return ⟨imp, (← findModule? imp.module)⟩
+    return ⟨imp, (← findModuleCached? imp.module)⟩
   return {path, header, imports, trace}
 
 /-- The `ModuleFacetConfig` for the builtin `inputFacet`. -/
@@ -458,7 +478,7 @@ only read early once its library's extra dependencies have finished (see `recFet
 def prefetchInputs (header : ModuleHeader) : FetchM Unit := do
   let snap ← getBuildStore
   for imp in header.imports do
-    for mod in ← findModules imp.module do
+    for mod in ← findModulesCached imp.module do
       let info := mod.lib.extraDep
       if let some job := snap.get? info.key then
         if ← IO.hasFinished job.task then
@@ -477,7 +497,7 @@ def fetchImportInfo
     if modName = imp.module then
       logError s!"{fileName}: module imports itself"
       return .error
-    let mods ← findModules imp.module
+    let mods ← findModulesCached imp.module
     if nonModule && !allowNonModules then
       if let some mod := mods.find? (·.requiresModuleSystem) then
         if pkgName == mod.pkg.keyName then

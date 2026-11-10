@@ -88,8 +88,6 @@ public structure BuildContext extends BuildConfig, Context where
   leanTrace : BuildTrace
   leanIncludeDirs : Array (Option (FilePath × BuildTrace))
   registeredJobs : JobQueue
-  /-- Memoized `Workspace.findModules` results (see `findModulesCached`). -/
-  moduleCache : IO.Ref (Lean.NameMap (Array Module))
   /--
   Input-to-output(s) map for hashes of the tracked package's artifacts.
   If `none`, tracking outputs is disabled for this build.
@@ -102,6 +100,11 @@ public structure BuildContext extends BuildConfig, Context where
    Only the build monitor should set this token: reporting assumes that a counted failure exists when the token is set.
   -/
   cancelTk? : Option IO.CancelToken := none
+  /--
+  Memoized `Workspace.findModules` results (see `findModulesCached`).
+  Last, so code compiled against a Lake without it reads the other fields at the same offsets.
+  -/
+  moduleCache : IO.Ref (Lean.NameMap (Array Module))
 
 /-- A transformer to equip a monad with a `BuildContext`. -/
 public abbrev BuildT := ReaderT BuildContext

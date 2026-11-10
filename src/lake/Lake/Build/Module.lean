@@ -473,6 +473,13 @@ def fetchImportInfo
   let info := ModuleImportInfo.nil modName
   let impArtsJob : Job ModuleImportInfo := .pure info
   prefetchInputs header
+  -- Walk the imports concurrently first; the ordered walk below then finds their export infos built.
+  let mut walks := #[]
+  for imp in header.imports do
+    if modName != imp.module then
+      for mod in ← findModules imp.module do
+        walks := walks.push (mod.metaExportInfo.key, discard mod.fetchExportInfo)
+  prefetchConcurrently walks
   header.imports.foldlM (init := impArtsJob) fun s imp => do
     if modName = imp.module then
       logError s!"{fileName}: module imports itself"

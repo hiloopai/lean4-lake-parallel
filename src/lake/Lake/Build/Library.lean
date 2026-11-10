@@ -74,6 +74,7 @@ def LeanLib.modulesFacetConfig : LibraryFacetConfig modulesFacet :=
 
 def LeanLib.recBuildElabArts (self : LeanLib) : FetchM (Job Unit) := do
   let mods ← (← self.modules.fetch).await
+  prefetchConcurrently <| mods.map fun mod => (mod.elabArts.key, mod.elabArts.fetch)
   mods.foldlM (init := Job.nil) fun job mod => do
     return job.mix <| ← mod.elabArts.fetch
 
@@ -83,6 +84,7 @@ public def LeanLib.elabArtsFacetConfig : LibraryFacetConfig elabArtsFacet :=
 
 def LeanLib.recBuildIRArts (self : LeanLib) : FetchM (Job Unit) := do
   let mods ← (← self.modules.fetch).await
+  prefetchConcurrently <| mods.map fun mod => (mod.irArts.key, mod.irArts.fetch)
   mods.foldlM (init := Job.nil) fun job mod => do
     return job.mix <| ← mod.irArts.fetch
 

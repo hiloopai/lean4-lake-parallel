@@ -364,6 +364,7 @@ def mkBuildContext
     else
       return none
   registeredJobs := jobs
+  claims := ← IO.mkRef {}
   leanTrace := .ofHash (pureHash ws.lakeEnv.leanGithash)
     s!"Lean {Lean.versionStringCore}, commit {ws.lakeEnv.leanGithash}"
   cancelTk?

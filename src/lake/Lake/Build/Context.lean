@@ -9,6 +9,7 @@ prelude
 public import Lake.Config.Cache
 public import Lake.Config.Context
 public import Lake.Build.Job.Basic
+public import Lake.Build.Claims
 
 open System
 namespace Lake
@@ -87,6 +88,8 @@ public structure BuildContext extends BuildConfig, Context where
   leanTrace : BuildTrace
   leanIncludeDirs : Array (Option (FilePath × BuildTrace))
   registeredJobs : JobQueue
+  /-- The build keys being computed or computed so far, for concurrent fetches. -/
+  claims : IO.Ref ClaimTable
   /--
   Input-to-output(s) map for hashes of the tracked package's artifacts.
   If `none`, tracking outputs is disabled for this build.

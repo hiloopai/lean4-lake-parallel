@@ -104,8 +104,9 @@ Returns the job of `key` from the build store, computing it with `compute` if ab
 Safe under concurrent fetches: the first fetcher claims `key` and computes it, while concurrent
 fetchers of `key` wait for that computation, so each key is computed exactly once. A wait that
 would close a cycle through concurrent fetches fails with a build cycle error instead.
-If `compute` throws, the claim is released, so a later fetch computes `key` again
-(as a sequential fetch would).
+A claim lasts only while its key is being computed: the job is stored before the claim is
+dropped, and a fetcher that wins a claim checks the store again. If `compute` throws, the claim
+is dropped without storing, so a later fetch computes `key` again (as a sequential fetch would).
 -/
 public partial def fetchOrCreateOnce
   (key : BuildKey) (compute : FetchM (Job (BuildData key)))
@@ -120,9 +121,15 @@ public partial def fetchOrCreateOnce
     | none => (none, {t with claims := t.claims.insert key {owner := me, done}})
   match prior? with
   | none =>
+    if let some job := (← store.get).get? key then
+      -- The previous owner finished between our first look and our claim.
+      ctx.claims.modify fun t => {t with claims := t.claims.erase key}
+      done.resolve true
+      return .ok job log
     match (← compute.toFn fetch pkg? stack store ctx log) with
     | .ok job log =>
       store.modify (·.insert key job)
+      ctx.claims.modify fun t => {t with claims := t.claims.erase key}
       done.resolve true
       return .ok job log
     | .error e log =>

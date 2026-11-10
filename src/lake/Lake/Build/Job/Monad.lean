@@ -7,6 +7,7 @@ module
 
 prelude
 public import Lake.Build.Fetch
+public import Lake.Util.Timeline
 
 open System Lean
 
@@ -174,7 +175,7 @@ namespace Job
 
 /-- Wait for a job to complete and return the result. -/
 @[inline] public protected def wait (self : Job α) : BaseIO (JobResult α) := do
-  IO.wait self.task
+  Timeline.timedWait self.task
 
 /--
 Wait for a job to complete and return the produced value.

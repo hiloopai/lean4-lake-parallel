@@ -11,6 +11,7 @@ import Lake.Config.Monad
 import Lake.Build.Job.Monad
 import Lake.Build.Index
 import Init.Omega
+import Lake.Util.Timeline
 
 /-! # Build Runner
 
@@ -460,8 +461,16 @@ public def Workspace.runBuild
   let cancelTk? ← if cfg.failFast then some <$> IO.CancelToken.new else pure none
   let mctx ← mkMonitorContext cfg jobs cancelTk?
   let bctx ← mkBuildContext ws cfg jobs cancelTk?
+  Timeline.mark "build-start"
+  let build : FetchM (Job α) := do
+    Timeline.mark s!"dfs-start {← IO.getTID}"
+    let r ← build
+    Timeline.mark "dfs-end"
+    return r
   let job ← startBuild bctx build
   let result ← monitorBuild mctx job
+  Timeline.mark "monitor-end"
+  Timeline.dump
   finalizeBuild cfg bctx mctx result
 
 /-- Produce a build job in the Lake monad's workspace and await the result. -/

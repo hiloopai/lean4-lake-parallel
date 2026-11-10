@@ -7,6 +7,7 @@ module
 
 prelude
 public import Lake.Build.Fetch
+public import Lake.Util.Timeline
 
 /-! # Job Registration -/
 
@@ -70,7 +71,9 @@ Stray I/O, logs, and errors produced by `x` will be wrapped into the job.
   [OptDataKind α] (caption : String) (x : FetchM (Job α)) (optional := false)
 : FetchM (Job α) := do
   let job ← ensureJob x
-  registerJob caption job optional
+  let job ← registerJob caption job optional
+  Timeline.onRegister caption job.task
+  return job
 
 /--
 Registers the produced job for the top-level build monitor
@@ -80,6 +83,8 @@ if it is not already (i.e., it has an empty caption).
   (caption : String) (job : Job α)
 : FetchM (Job α) := do
   if job.caption.isEmpty then
-    registerJob caption job
+    let job ← registerJob caption job
+    Timeline.onRegister caption job.task
+    return job
   else
     return job

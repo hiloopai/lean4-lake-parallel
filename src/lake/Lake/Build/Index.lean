@@ -10,6 +10,7 @@ public import Lake.Build.Fetch
 import Lake.Config.Monad
 import Lake.Build.Topological
 import Lake.Util.StoreInsts
+import Lake.Util.Timeline
 
 /-!
 # The Lake Build Index
@@ -26,13 +27,13 @@ open System (FilePath)
 namespace Lake
 
 /-- Recursive build function for anything in the Lake build index. -/
-def recBuildWithIndex (info : BuildInfo) : FetchM (Job (BuildData info.key)) :=
+def recBuildWithIndexCore (info : BuildInfo) : FetchM (Job (BuildData info.key)) :=
   match info with
   | .target pkg target => do
     if let some decl := pkg.findTargetDecl? target then
       if h : decl.kind.isAnonymous then
         let key := BuildKey.packageTarget pkg.keyName target
-        fetchOrCreate key do (decl.targetConfig h).fetchFn pkg
+        fetchOrCreate key do Timeline.countCompute; (decl.targetConfig h).fetchFn pkg
       else
         let kind := ⟨decl.kind, by simp [decl.target_eq_type h]⟩
         let job := Job.pure (kind := kind) <| decl.mkConfigTarget pkg
@@ -45,7 +46,7 @@ def recBuildWithIndex (info : BuildInfo) : FetchM (Job (BuildData info.key)) :=
         let recFetch := config.fetchFn <| cast (by simp [h]) data
         if config.memoize then
           let key := BuildKey.facet target facet
-          fetchOrCreate key recFetch
+          fetchOrCreate key do Timeline.countCompute; recFetch
         else
           recFetch
       else
@@ -53,6 +54,10 @@ def recBuildWithIndex (info : BuildInfo) : FetchM (Job (BuildData info.key)) :=
           input target is of kind '{kind}', but facet expects '{config.kind}'"
     else
       error s!"invalid target '{info}': unknown facet '{facet}'"
+
+def recBuildWithIndex (info : BuildInfo) : FetchM (Job (BuildData info.key)) := do
+  Timeline.countFetch
+  recBuildWithIndexCore info
 
 /-- Recursive build function with memoization. -/
 def recFetchWithIndex : (info : BuildInfo) → RecBuildM (Job (BuildData info.key)) :=

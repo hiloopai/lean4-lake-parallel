@@ -132,12 +132,11 @@ public partial def fetchOrCreateOnce
   | some c =>
     unless (← IO.hasFinished c.done.result?) do
       let cycle? ← ctx.claims.modifyGet fun t =>
-        match t.cycle? me key with
-        | some path => (some path, t)
-        | none => (none, {t with waiting := t.waiting.insert me key})
-      if let some path := cycle? then
-        let msg := buildCycleError (stack.take 1 ++ path)
-        return .error log.endPos (log.push (.error msg))
+        match t.cycle? me stack key with
+        | some cycle => (some cycle, t)
+        | none => (none, {t with waiting := t.waiting.insert me (key, stack)})
+      if let some cycle := cycle? then
+        return .error log.endPos (log.push (.error (buildCycleError cycle)))
       discard <| IO.wait c.done.result?
       ctx.claims.modify fun t => {t with waiting := t.waiting.erase me}
     if let some job := (← store.get).get? key then
@@ -166,12 +165,11 @@ public def prefetchConcurrently (xs : Array (BuildKey × FetchM α)) : FetchM Un
   for (key, task) in tasks do
     unless (← IO.hasFinished task) do
       let cycle? ← ctx.claims.modifyGet fun t =>
-        match t.cycle? me key with
-        | some path => (some path, t)
-        | none => (none, {t with waiting := t.waiting.insert me key})
-      if let some path := cycle? then
-        let msg := buildCycleError (stack.take 1 ++ path)
-        return .error log.endPos (log.push (.error msg))
+        match t.cycle? me stack key with
+        | some cycle => (some cycle, t)
+        | none => (none, {t with waiting := t.waiting.insert me (key, stack)})
+      if let some cycle := cycle? then
+        return .error log.endPos (log.push (.error (buildCycleError cycle)))
       discard <| IO.wait task
       ctx.claims.modify fun t => {t with waiting := t.waiting.erase me}
     if let .ok _ l := task.get then

@@ -9,6 +9,7 @@ prelude
 public import Lake.Config.Cache
 public import Lake.Config.Context
 public import Lake.Build.Job.Basic
+public import Lake.Config.Module
 
 open System
 namespace Lake
@@ -87,6 +88,8 @@ public structure BuildContext extends BuildConfig, Context where
   leanTrace : BuildTrace
   leanIncludeDirs : Array (Option (FilePath × BuildTrace))
   registeredJobs : JobQueue
+  /-- Memoized `Workspace.findModules` results (see `findModulesCached`). -/
+  moduleCache : IO.Ref (Lean.NameMap (Array Module))
   /--
   Input-to-output(s) map for hashes of the tracked package's artifacts.
   If `none`, tracking outputs is disabled for this build.

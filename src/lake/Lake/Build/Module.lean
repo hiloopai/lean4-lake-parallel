@@ -42,6 +42,21 @@ import's IR is loaded (see `Lean.importModulesCore`). When code generation is po
 @[inline] def Module.fetchExportInfo (self : Module) : FetchM (Job ModuleMetaExportInfo) :=
   self.metaExportInfo.fetch
 
+/--
+`findModules`, memoized for the build. The walk resolves every import of every module it visits,
+and `Workspace.findModules` tests each import against every library's roots and globs.
+Only the walk uses it: header parses run concurrently, and they would contend on the memo's ref.
+-/
+def findModulesCached
+  [Monad m] [MonadBuild m] [MonadWorkspace m] [MonadLiftT (ST IO.RealWorld) m] (mod : Lean.Name)
+: m (Array Module) := do
+  let cache := (← getBuildContext).moduleCache
+  if let some mods := (← cache.get).find? mod then
+    return mods
+  let mods ← findModules mod
+  cache.modify (·.insert mod mods)
+  return mods
+
 /-! ## Facet Builds
 Build function definitions for a module's builtin facets.
 -/
@@ -450,6 +465,20 @@ def Package.discriminant (self : Package) :=
   else
     s!"{self.prettyName}@{self.version}"
 
+/--
+Start reading and parsing the headers of `header`'s imports, so that the import walk, which
+descends into one import at a time, does not wait on each file in turn. A module's input is
+only read early once its library's extra dependencies have finished (see `recFetchPreSetup`).
+-/
+def prefetchInputs (header : ModuleHeader) : FetchM Unit := do
+  let snap ← getBuildStore
+  for imp in header.imports do
+    for mod in ← findModulesCached imp.module do
+      let info := mod.lib.extraDep
+      if let some job := snap.get? info.key then
+        if ← IO.hasFinished job.task then
+          discard mod.input.fetch
+
 set_option linter.unusedVariables.funArgs false in
 def fetchImportInfo
   (fileName : String) (pkgName modName : Name) (header : ModuleHeader)
@@ -458,11 +487,12 @@ def fetchImportInfo
   let nonModule := !header.isModule
   let info := ModuleImportInfo.nil modName
   let impArtsJob : Job ModuleImportInfo := .pure info
+  prefetchInputs header
   header.imports.foldlM (init := impArtsJob) fun s imp => do
     if modName = imp.module then
       logError s!"{fileName}: module imports itself"
       return .error
-    let mods ← findModules imp.module
+    let mods ← findModulesCached imp.module
     if nonModule && !allowNonModules then
       if let some mod := mods.find? (·.requiresModuleSystem) then
         if pkgName == mod.pkg.keyName then

@@ -459,18 +459,51 @@ public def writeMap
   (overwrite := true)
 : IO Unit := map.forM fun i e => cache.writeOutputsCore scope i e.out service? remoteScope? overwrite
 
+/--
+Asks `LAKE_OUTPUTS_ENDPOINT`, when set, for the outputs of an input the cache lacks, through `curl`
+(`$CURL`) at `<endpoint>/<scope>/<inputHash>.json`, written to `path`. Whether it wrote them: a miss
+writes no file and logs nothing, so the build goes on as without an endpoint. (Overlay only: the
+endpoint is hiloop's `cov-lake-cache`, which serves other builds' outputs for the same input.)
+-/
+def fetchOutputs (path : FilePath) (scope : String) (inputHash : Hash) : BaseIO Bool := do
+  let endpoint := (← IO.getEnv "LAKE_OUTPUTS_ENDPOINT").getD ""
+  if endpoint.isEmpty then
+    return false
+  let url := s!"{endpoint}/{scope}/{inputHash}.json"
+  let fetched ← (do
+    if let some parent := path.parent then
+      IO.FS.createDirAll parent
+    IO.Process.output {
+      cmd := ← Internal.getCurl
+      args := #["-s", "-S", "-f", "-o", path.toString, "-L", url]
+    }).toBaseIO
+  match fetched with
+  | .ok out => return out.exitCode == 0
+  | .error _ => return false
+
+/-- The cached outputs file for an input, else those `fetchOutputs` writes for it. -/
+def readOrFetchOutputs (path : FilePath) (scope : String) (inputHash : Hash) : LogIO (Option String) := do
+  match (← IO.FS.readFile path |>.toBaseIO) with
+  | .ok contents => return some contents
+  | .error (.noFileOrDirectory ..) =>
+    if (← fetchOutputs path scope inputHash) then
+      match (← IO.FS.readFile path |>.toBaseIO) with
+      | .ok contents => return some contents
+      | .error e => error s!"{path}: read failed: {e}"
+    else
+      return none
+  | .error e => error s!"{path}: read failed: {e}"
+
 /-- Retrieve the cached outputs corresponding to the given input for the package (if any). -/
 public def readOutputs? (cache : Cache) (scope : String) (inputHash : Hash) : LogIO (Option CacheOutput) := do
   let path := cache.outputsFile scope inputHash
-  match (← IO.FS.readFile path |>.toBaseIO) with
-  | .ok contents =>
-    match Json.parse contents >>= fromJson? with
-    | .ok out =>
-      return some out
-    | .error e =>
-      error s!"{path}: invalid JSON: {e}"
-  | .error (.noFileOrDirectory ..) => return none
-  | .error e => error s!"{path}: read failed: {e}"
+  let some contents ← readOrFetchOutputs path scope inputHash
+    | return none
+  match Json.parse contents >>= fromJson? with
+  | .ok out =>
+    return some out
+  | .error e =>
+    error s!"{path}: invalid JSON: {e}"
 
 /-- The directory where input-to-output mappings of downloaded package revisions are cached. -/
 @[inline] public def revisionDir (cache : Cache) : FilePath :=

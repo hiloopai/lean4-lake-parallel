@@ -1385,6 +1385,11 @@ where
       if let some ltar := arts.ltar? then
         ref.insert inputHash ltar.descr (mod.platformIndependent.getD false)
         return arts
+      else if (← IO.getEnv "LAKE_OUTPUTS_UNPACKED").isSome then
+        -- (overlay) A recorder that stores outputs as they are, such as hiloop's
+        -- `cov-lake-cache build`, takes them without an archive packed for every module.
+        ref.insert inputHash arts.descrs (mod.platformIndependent.getD false)
+        return arts
       else
         let ltar ← mod.packLtar arts
         ref.insert inputHash ltar.descr (mod.platformIndependent.getD false)
